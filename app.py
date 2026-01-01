@@ -4,6 +4,7 @@ import streamlit as st
 from model.scraping import extract_sire_id
 from model.utils import save_jsonl, build_horse_dict, read_jsonl, clean_sire_horse_df, clean_race_df, read_horse_raw_data
 from model.widget import scraping_and_save_data, st_hire_horse_birth_year, show_prize_money_histogram, race_record_ratio_chart
+import model.widget as st_widget
 
 st.set_page_config(page_title="Keiba Blood Data Analyzer", layout="centered", page_icon="🐴")
 
@@ -34,12 +35,22 @@ with st.sidebar:
     c_condition = st.multiselect("馬場状態", ("良", "稍", "重", "不"), default=None)
     c_field_cat = st.multiselect("競馬場", ("中央", "地方"), default=None)
     c_data_min = st.number_input("最低データ数", min_value=1, value=10, step=1)
+    c_show_timediff_graph = st.toggle("着差グラフを表示", value=False)
 
 def filter_race_df(df, c_dirt_turf, c_distance, c_condition, c_field_cat):
     if c_dirt_turf != "両方":
         df = df[df["芝ダート"] == {"芝":"芝", "ダート":"ダ"}[c_dirt_turf]]
     if c_distance:
-        df = df[df["距離区分"].isin(c_distance)]
+        distance_mapping = {
+            "短距離": ["0800~1400"],
+            "マイル": ["1400~1800"],
+            "中距離": ["1800~2400"],
+            "長距離": ["2400~3000"]
+        }
+        allowed_distances = []
+        for dist_cat in c_distance:
+            allowed_distances.extend(distance_mapping.get(dist_cat, []))
+        df = df[df["距離区分"].isin(allowed_distances)]
     if c_condition:
         df = df[df["馬場"].isin(c_condition)]
     if c_field_cat:
@@ -66,6 +77,7 @@ with tab_analysis:
             "産駒",
             "距離",
             "競馬場",
+            "馬場",
             "季節",
             "カーブ",
             "芝ダート",
@@ -92,30 +104,49 @@ with tab_analysis:
                             .drop(columns=drop_columns, errors='ignore')
                             .sort_values(by="総賞金(万円)", ascending=False)
                             )
+        
+        def show_graph(df_race, analysis_name, c_data_min, c_show_timediff_graph):
+            # 距離ごとでの戦績
+            if analysis_name == "産駒":
+                groupby_cols = ["芝ダート", "距離区分", "馬場"]
 
-        # 距離ごとでの戦績
-        elif analysis_idx == 1:
-            race_record_ratio_chart(df_race, ["芝ダート", "距離区分", "馬場"],data_min=c_data_min)
+            # 距離ごとでの戦績
+            elif analysis_name == "距離":
+                groupby_cols = ["距離区分", "芝ダート"]
 
-        # 距離ごとでの戦績
-        elif analysis_idx == 2:
-            race_record_ratio_chart(df_race, ["競馬場", "芝ダート"],data_min=c_data_min)
-        # 季節ごとでの戦績
-        elif analysis_idx == 3:
-            race_record_ratio_chart(df_race, ["季節", "芝ダート", "距離区分"],data_min=c_data_min)
+            # 競馬場ごとでの戦績
+            elif analysis_name == "競馬場":
+                groupby_cols = ["競馬場", "芝ダート"]
 
-        # カーブごとでの戦績
-        elif analysis_idx == 4:
-            race_record_ratio_chart(df_race, ["カーブ", "芝ダート", "距離区分"],data_min=c_data_min)
+            # 季節ごとでの戦績
+            elif analysis_name == "季節":
+                groupby_cols = ["季節", "芝ダート", "距離区分"]
 
-        # 芝ダートごとでの戦績
-        elif analysis_idx == 5:
-            race_record_ratio_chart(df_race, ["芝ダート", "馬場"],data_min=c_data_min)
+            # カーブごとでの戦績
+            elif analysis_name == "カーブ":
+                groupby_cols = ["カーブ", "芝ダート", "距離区分"]
 
-        # 騎手ごとでの戦績
-        elif analysis_idx == 6:
-            race_record_ratio_chart(df_race, ["騎手", "距離区分"],data_min=c_data_min)
+            # 芝ダートごとでの戦績
+            elif analysis_name == "芝ダート":
+                groupby_cols = ["芝ダート", "馬場"]
+
+            # 騎手ごとでの戦績
+            elif analysis_name == "騎手":
+                groupby_cols = ["騎手", "距離区分"]
+            
+            # 馬場ごとでの戦績
+            elif analysis_name == "馬場":
+                groupby_cols = ["馬場", "芝ダート", "距離区分"]
+
+            if analysis_name:
+                if c_show_timediff_graph:
+                    st_widget.race_margin_timediff_chart(df_race, groupby_cols, data_min=c_data_min)
+                else:
+                    st_widget.race_record_ratio_chart(df_race, groupby_cols,data_min=c_data_min)
+                
+                st.dataframe(df_race)
+
+        
+        show_graph(df_race, analysis_name, c_data_min, c_show_timediff_graph)
 
 
-        st.dataframe(df_race)
-    

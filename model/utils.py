@@ -101,13 +101,13 @@ with open(os.path.join("data", "field_info.json"), "r", encoding="utf-8") as f:
 
 def judge_distance_category(distance: int) -> str:
     if distance < 1400:
-        return "短距離"
+        return "0800~1400"
     elif 1400 <= distance < 1800:
-        return "マイル"
+        return "1400~1800"
     elif 1800 <= distance < 2400:
-        return "中距離"
+        return "1800~2400"
     else:
-        return "長距離"
+        return "2400~3000"
 
 def clean_race_df(df, field_info=field_info):
     df.rename(columns=lambda x: x.replace(" ", ""), inplace=True)

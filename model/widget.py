@@ -311,3 +311,54 @@ def race_record_ratio_chart(df_race: pd.DataFrame, groupby_cols: List[str], data
     st.altair_chart(chart_stack, width='stretch')
 
     st.dataframe(stats.drop(columns=["連帯数", "複勝数", "掲示板数", "掲示板内数"]),hide_index=True)
+
+
+def race_margin_timediff_chart(df_race: pd.DataFrame, groupby_cols: List[str], data_min: int):
+    """着差のバイオリンチャートを条件ごとに表示する関数"""
+    import plotly.express as px
+    
+    # 着差データをクリーンアップ
+    df_race_clean = df_race.dropna(subset=["芝ダート"])
+    
+    # 着差を数値に変換（必要に応じて）
+    df_race_clean.loc[:, "着差_数値"] = pd.to_numeric(df_race_clean["着差"], errors='coerce')
+    df_race_clean = df_race_clean.dropna(subset=["着差_数値"])
+    
+    # 条件名を作成
+    df_race_clean["条件"] = ""
+    for col in groupby_cols:
+        if col in df_race_clean.columns:
+            df_race_clean["条件"] += df_race_clean[col].astype(str) + "/"
+    df_race_clean["条件"] = df_race_clean["条件"].str.rstrip("/")
+    
+    # 各条件のデータ数を集計
+    condition_counts = df_race_clean.groupby("条件").size()
+    valid_conditions = condition_counts[condition_counts >= data_min].index
+    
+    # データ数が少ない条件を除外
+    df_filtered = df_race_clean[df_race_clean["条件"].isin(valid_conditions)]
+    
+    if df_filtered.empty:
+        st.warning(f"データ数が{data_min}以上の条件がありません。")
+        return
+    
+    # 条件列を50音順にソート
+    df_filtered = df_filtered.sort_values("条件")
+    
+    # 箱ひげ図
+    fig = px.box(
+        df_filtered,
+        y="条件",
+        x="着差_数値",
+        color="条件",
+        # title="条件別着差の分布",
+        labels={"着差_数値": "着差", "条件": "条件"},
+        orientation="h",
+        height=600,
+        category_orders={"条件": sorted(df_filtered["条件"].unique())}
+    )
+    fig.update_xaxes(range=[-2, 3])
+    fig.update_layout(showlegend=False)
+    fig.add_vline(x=0, line_dash="dash", line_color="gray")
+    
+    st.plotly_chart(fig, width='stretch')
