@@ -6,9 +6,9 @@ from model.utils import save_jsonl, build_horse_dict, read_jsonl, clean_sire_hor
 from model.widget import scraping_and_save_data, st_hire_horse_birth_year, show_prize_money_histogram, race_record_ratio_chart
 import model.widget as st_widget
 
-st.set_page_config(page_title="Keiba Blood Data Analyzer", layout="centered", page_icon="🐴")
+st.set_page_config(page_title="Sire Analyzer", layout="centered", page_icon="🐴")
 
-st.title("Keiba Blood Data Analyzer🐴")
+st.title("Sire Analyzer🐴")
 
 tab_scraping, tab_analysis = st.tabs(["Data Scraping", "Data Analysis"])
 
