@@ -14,9 +14,16 @@ from typing import List
 import pandas as pd
 
 from model.scraping import get_response, parse_netkeiba_horse_list_table
-from model.utils import save_jsonl
+from model.utils import save_jsonl, save_txt
 
 import re
+import boto3
+import tempfile
+import shutil
+
+# 警告非表示設定
+pd.options.mode.chained_assignment = None
+
 
 def extract_sire_id(url: str) -> str | None:
     """
@@ -85,15 +92,38 @@ def st_scraping_race_data(
     progress_bar = st.progress(0)
     status_text = st.empty()
 
-    # 既に読み込み済みのデータを確認
-    with open(os.path.join(output_dir, "races", "horse_names.json"), "r", encoding="utf-8") as f:
-        horse_names = json.load(f)
+    horse_names_file = os.path.join(output_dir, "races", "horse_names.json")
+    
+    # S3パスかローカルパスかを判定
+    if horse_names_file.startswith("s3://"):
+        # S3から読み込み
+        try:
+            s3 = boto3.client('s3')
+            # s3://bucket/key形式からバケット名とキーを抽出
+            s3_path = horse_names_file.replace("s3://", "")
+            bucket_name = s3_path.split("/")[0]
+            key = "/".join(s3_path.split("/")[1:])
+            
+            response = s3.get_object(Bucket=bucket_name, Key=key)
+            horse_names = json.loads(response['Body'].read().decode('utf-8'))
+        except s3.exceptions.NoSuchKey:
+            horse_names = {}
+        except Exception:
+            horse_names = {}
+    else:
+        # ローカルから読み込み
+        if not os.path.exists(horse_names_file):
+            horse_names = {}
+        else:
+            with open(horse_names_file, "r", encoding="utf-8") as f:
+                horse_names = json.load(f)
 
     for i, sire_data in enumerate(sire_results):  # 動作確認のため最初の2頭だけ
 
         horse_id = sire_data.get("horse_id")
         output_path = os.path.join(output_dir, "races", f"{horse_id}.jsonl")
         horse_name = sire_data.get("horse_name")
+        # 既に読み込み済みの場合
         if not horse_id or horse_id in horse_names:
             time.sleep(0.05)
             continue # horse_idがない場合はスキップ
@@ -117,71 +147,78 @@ def st_scraping_race_data(
         time.sleep(random.randrange(2, 4))  # アクセス間隔（重要）
 
     
-        with open(os.path.join(output_dir, "races", "horse_names.json"), "w", encoding="utf-8") as f:
-            json.dump(horse_names, f, ensure_ascii=False, indent=4)
+        # with open(os.path.join(output_dir, "races", "horse_names.json"), "w", encoding="utf-8") as f:
+        #     json.dump(horse_names, f, ensure_ascii=False, indent=4)
     
     progress_bar.progress(1.0)
     status_text.text(f"{len(sire_results)}馬分の戦績を取得完了")
 
 
-def scraping_and_save_data(base_url, max_pages, sire_id):
-    output_dir = f"data/{sire_id}"
+def scraping_and_save_data(base_url, max_pages, sire_id, use_local=False, 
+                           s3_bucket="keiba-blood-analyzer-storage", s3_prefix="data"):
+    """
+    種牡馬データをスクレイピングし、ローカルまたはS3に保存する
+    
+    Args:
+        base_url: スクレイピング対象のURL
+        max_pages: 最大ページ数
+        sire_id: 種牡馬ID
+        use_local: Trueの場合ローカルに保存、Falseの場合S3に保存
+        s3_bucket: S3バケット名（use_local=Falseの場合必須）
+        s3_prefix: S3のプレフィックス（デフォルト: "data"）
+    """
+    
+    if use_local:
+        output_dir = f"data/{sire_id}"
+    else:
+        if not s3_bucket:
+            st.error("S3保存時はs3_bucketパラメータが必須です")
+            return
+        output_dir = f"s3://{s3_bucket}/{s3_prefix}/{sire_id}"
 
     # （１）種牡馬の産駒のリストをスクレイピング
     sire_results, sire_horse_name = st_scraping_sire_data(base_url, max_pages=max_pages)
     if sire_results != []:
-        save_jsonl(sire_results, os.path.join(output_dir, f"{sire_id}.jsonl"))
-        # 種牡馬の名前をテキストファイルにも保存
-        with open(os.path.join(output_dir, f"{sire_horse_name}.txt"), "w") as f:
-            f.write(sire_horse_name)
+        sire_file = os.path.join(output_dir, f"{sire_id}.jsonl")
+        name_file = os.path.join(output_dir, f"{sire_horse_name}.txt")
+        
+        if use_local:
+            with open(name_file, "w") as f:
+                f.write(sire_horse_name)
+        else:
+            save_txt(sire_horse_name, name_file)
+
+        # 
+        save_jsonl(sire_results, sire_file)
 
         # （２）産駒ごとにレース結果を取得
         if sire_results:
             st_scraping_race_data(sire_results, output_dir)
+        
+        if not use_local:
+            st.success(f"データをS3 ({s3_bucket}/{s3_prefix}/{sire_id}) に保存しました")
+        else:
+            st.success(f"データをローカル ({output_dir}) に保存しました")
     else:
         st.warning("産駒データが取得できませんでした。URLを確認してください。")
 
 
 def st_hire_horse_birth_year(df_sire) -> str:
-    # 全年 × 性 の組み合わせを作る
-    years = list(range(2015, 2024))
-    sexes = ["牡", "牝", "セ"]
-
-    full_index = pd.MultiIndex.from_product(
-        [years, sexes],
-        names=["生年", "性"]
-    )
-
-    df_count = (
+    # 性別ごとにピボットテーブルを作成
+    df_pivot = (
         df_sire
         .groupby(["生年", "性"])
         .size()
-        .reindex(full_index, fill_value=0)
-        .reset_index(name="件数")
-        )
-
-    chart = (
-        alt.Chart(df_count)
-        .mark_bar()
-        .encode(
-            y=alt.Y(          # ← 年をY軸に
-                "生年:O",
-                title="生年",
-                sort=sorted(df_count["生年"].unique())
-            ),
-            x=alt.X(          # ← 件数をX軸に（積み上げ）
-                "件数:Q",
-                title="頭数",
-                stack="zero"  # 明示してもOK（デフォルト）
-            ),
-            color=alt.Color(
-                "性:N",
-                title="性"
-            ),
-            tooltip=["生年", "性", "件数"]
-        )
+        .reset_index(name="頭数")
+        .pivot(index="生年", columns="性", values="頭数")
+        .fillna(0)
+        .astype(int)
     )
-    st.altair_chart(chart, width='stretch')
+    
+    # 合計列を追加
+    df_pivot["合計"] = df_pivot.sum(axis=1)
+    
+    st.dataframe(df_pivot, width='stretch')
 
 
 def show_prize_money_histogram(df_sire: pd.DataFrame):
@@ -301,16 +338,23 @@ def race_record_ratio_chart(df_race: pd.DataFrame, groupby_cols: List[str], data
                 scale=alt.Scale(
                     domain=category_order,
                     range=["#f6ea7a", "#88bee1", "#e3aaa2", "#b4b6b3", "#a2a2a5"]
-                )
+                ),
+                legend=alt.Legend(orient="bottom", direction="horizontal")
             ),
             tooltip=["条件", "着順カテゴリ", alt.Tooltip("割合:Q", format=".2f")]
         )
         .properties(height=400)
     )
 
-    st.altair_chart(chart_stack, width='stretch')
+    # 50%の位置に縦線を追加
+    rule = alt.Chart(pd.DataFrame({'x': [0.5]})).mark_rule(color='gray', strokeDash=[5, 5]).encode(
+        x='x:Q'
+    )
 
-    st.dataframe(stats.drop(columns=["連帯数", "複勝数", "掲示板数", "掲示板内数"]),hide_index=True)
+    st.altair_chart(chart_stack + rule, width='stretch')
+
+    st.dataframe(stats[groupby_cols + ["勝率", "連帯率", "複勝率", "総出走数", "戦績"]], 
+                 hide_index=True, width='stretch')
 
 
 def race_margin_timediff_chart(df_race: pd.DataFrame, groupby_cols: List[str], data_min: int):
@@ -358,7 +402,13 @@ def race_margin_timediff_chart(df_race: pd.DataFrame, groupby_cols: List[str], d
         category_orders={"条件": sorted(df_filtered["条件"].unique())}
     )
     fig.update_xaxes(range=[-2, 3])
-    fig.update_layout(showlegend=False)
+    fig.update_layout(
+        showlegend=False,
+        hovermode=False
+    )
+    fig.update_traces(hoverinfo='skip', hovertemplate=None)
+    fig.update_xaxes(fixedrange=True)
+    fig.update_yaxes(fixedrange=True)
     fig.add_vline(x=0, line_dash="dash", line_color="gray")
     
-    st.plotly_chart(fig, width='stretch')
+    st.plotly_chart(fig, width='stretch', config={'displayModeBar': False})

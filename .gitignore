@@ -12,3 +12,4 @@ __pycache__/
 *.pem
 gh_actions_deploy
 gh_actions_deploy.pub
+OLD_data/
