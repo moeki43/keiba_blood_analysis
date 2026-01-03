@@ -18,7 +18,7 @@ refresh_btn = st.sidebar.button("Refresh")
 # 読み込み済みの種牡馬一覧データを読み込み
 @st.cache_data(ttl=600)  # ttlで秒ごとにキャッシュをリセット
 def load_sire_horse_dict():
-    return build_horse_dict("data/", use_s3=True)
+    return build_horse_dict("data/")
 
 if refresh_btn:
     load_sire_horse_dict.clear()
