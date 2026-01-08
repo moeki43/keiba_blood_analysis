@@ -27,11 +27,17 @@ pd.options.mode.chained_assignment = None
 
 def extract_sire_id(url: str) -> str | None:
     """
-    URL文字列から sire_id 以降の数字だけを取得する
+    URL文字列またはテキストから sire_id または id パラメータの数字を取得する
     見つからなければ None を返す
     """
-    m = re.search(r"sire_id=([a-zA-Z0-9]+)", url)
-    return m.group(1) if m else None
+    # テキスト内に"sire"という文字列が含まれている場合
+    if 'sire' in url.lower():
+        # id= の形式を探す
+        m = re.search(r"id=([a-zA-Z0-9]+)", url)
+        if m:
+            return m.group(1)
+    
+    return None
 
 
 def get_sire_name_from_title(text):
@@ -269,7 +275,7 @@ def show_prize_money_histogram(df_sire: pd.DataFrame):
         tooltip=["馬名:N", alt.Tooltip("総賞金(万円):Q", format=",.0f", title="総賞金(万円)")]
     )
 
-    st.altair_chart(hist_chart + point_chart, width='stretch')
+    st.altair_chart(hist_chart, width='stretch')
 
 
 # ソート時のインデックスを特定列に作成

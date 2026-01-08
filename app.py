@@ -2,9 +2,8 @@ import os
 import streamlit as st
 from streamlit import session_state as ss
 
-from model.scraping import extract_sire_id
 from model.utils import save_jsonl, build_horse_dict, read_jsonl, clean_sire_horse_df, clean_race_df, read_horse_raw_data
-from model.widget import scraping_and_save_data, st_hire_horse_birth_year, show_prize_money_histogram, race_record_ratio_chart
+from model.widget import scraping_and_save_data, st_hire_horse_birth_year, show_prize_money_histogram, race_record_ratio_chart, extract_sire_id
 import model.widget as st_widget
 
 st.set_page_config(page_title="Sire Analyzer", layout="centered", page_icon="🐴")
@@ -34,6 +33,7 @@ with tab_scraping:
     max_pages = st.number_input("Max Pages to Scrape", min_value=1, value=3, step=1, max_value=30)
 
     sire_id = extract_sire_id(base_url) if base_url else None
+    st.write(sire_id)
     if not base_url:
         st.warning("Please enter a valid netkeiba URL.")
     elif not sire_id:
