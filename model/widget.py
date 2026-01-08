@@ -147,8 +147,23 @@ def st_scraping_race_data(
         time.sleep(random.randrange(2, 4))  # アクセス間隔（重要）
 
     
-        # with open(os.path.join(output_dir, "races", "horse_names.json"), "w", encoding="utf-8") as f:
-        #     json.dump(horse_names, f, ensure_ascii=False, indent=4)
+        # horse_names.jsonの保存（S3 or ローカル）
+        if horse_names_file.startswith("s3://"):
+            # S3に保存
+            s3 = boto3.client('s3')
+            s3_path = horse_names_file.replace("s3://", "")
+            bucket_name = s3_path.split("/")[0]
+            key = "/".join(s3_path.split("/")[1:])
+            
+            s3.put_object(
+                Bucket=bucket_name,
+                Key=key,
+                Body=json.dumps(horse_names, ensure_ascii=False, indent=4).encode('utf-8')
+            )
+        else:
+            # ローカルに保存
+            with open(horse_names_file, "w", encoding="utf-8") as f:
+                json.dump(horse_names, f, ensure_ascii=False, indent=4)
     
     progress_bar.progress(1.0)
     status_text.text(f"{len(sire_results)}馬分の戦績を取得完了")
@@ -257,6 +272,29 @@ def show_prize_money_histogram(df_sire: pd.DataFrame):
     st.altair_chart(hist_chart + point_chart, width='stretch')
 
 
+# ソート時のインデックスを特定列に作成
+def rename_col_for_sorting(df, groupby_cols: List[str]) -> pd.DataFrame:
+    if "馬場" in groupby_cols:
+        df["馬場"] = df["馬場"].map({"良":"①良", "稍":"②稍重", "重":"③重", "不":"④不良"})
+    if "クラス" in groupby_cols:
+        class_order = {
+            "G1": "①G1",
+            "G2": "②G2",
+            "G3": "③G3",
+            "重賞": "④重賞",
+            "L": "⑤リステッド",
+            "OP": "⑥オープン特別",
+            "3勝クラス": "⑦3勝クラス",
+            "2勝クラス": "⑧2勝クラス",
+            "1勝クラス": "⑨1勝クラス",
+            "新馬・未勝利": "⑩新馬・未勝利",
+            "その他": "その他",
+        }
+        df["クラス"] = df["クラス"].map(class_order)
+    return df
+
+
+
 def race_record_ratio_chart(df_race: pd.DataFrame, groupby_cols: List[str], data_min: int):
     # 芝・ダートごとの成績を集計
     df_race_clean = df_race.dropna(subset=["芝ダート"])
@@ -297,6 +335,10 @@ def race_record_ratio_chart(df_race: pd.DataFrame, groupby_cols: List[str], data
     # データ数が少ない条件を除外
     stats = stats[stats["総出走数"] >= data_min]
 
+    # ソート用に特定の列をリネーム
+    stats = rename_col_for_sorting(stats, groupby_cols)
+
+
     # データを可視化用に整形
     stats_viz = stats.copy()
     stats_viz["着外数"] = stats_viz["総出走数"] - stats_viz["掲示板内数"]
@@ -308,12 +350,12 @@ def race_record_ratio_chart(df_race: pd.DataFrame, groupby_cols: List[str], data
     stats_viz["掲示板率"] = (stats_viz["掲示板数"] / stats_viz["総出走数"] * 100).round(2)
     stats_viz["着外率"] = (stats_viz["着外数"] / stats_viz["総出走数"] * 100).round(2)
 
+
     # 条件名を作成
     stats_viz["条件"] = ""
     for col in groupby_cols:
         stats_viz["条件"] += stats_viz[col] + "/"
     stats_viz["条件"] = stats_viz["条件"].str.rstrip("/")
-    # stats_viz["条件"] = stats_viz["芝ダート"] + " " + stats_viz["距離区分"] + " " + stats_viz["馬場"] + " (" + stats_viz["総出走数"].astype(str) + ")"
 
     # 縦持ちデータに変換
     stats_melted = stats_viz.melt(
@@ -330,7 +372,7 @@ def race_record_ratio_chart(df_race: pd.DataFrame, groupby_cols: List[str], data
         alt.Chart(stats_melted)
         .mark_bar()
         .encode(
-            y=alt.Y("条件:N", title="条件"),
+            y=alt.Y("条件:N", title="条件", axis=alt.Axis(labelLimit=0)),
             x=alt.X("割合:Q", title="割合 (%)", stack="normalize", axis=alt.Axis(format='%')),
             color=alt.Color(
                 "着順カテゴリ:N",
@@ -343,7 +385,7 @@ def race_record_ratio_chart(df_race: pd.DataFrame, groupby_cols: List[str], data
             ),
             tooltip=["条件", "着順カテゴリ", alt.Tooltip("割合:Q", format=".2f")]
         )
-        .properties(height=400)
+        .properties(height=600)
     )
 
     # 50%の位置に縦線を追加
@@ -353,8 +395,17 @@ def race_record_ratio_chart(df_race: pd.DataFrame, groupby_cols: List[str], data
 
     st.altair_chart(chart_stack + rule, width='stretch')
 
+
     st.dataframe(stats[groupby_cols + ["勝率", "連帯率", "複勝率", "総出走数", "戦績"]], 
-                 hide_index=True, width='stretch')
+                 hide_index=True, 
+                 width='stretch',
+                 column_config={
+                     "勝率": st.column_config.NumberColumn(width="small"),
+                     "連帯率": st.column_config.NumberColumn(width="small"),
+                     "複勝率": st.column_config.NumberColumn(width="small"),
+                     "総出走数": st.column_config.NumberColumn(width="small"),
+                     "戦績": st.column_config.TextColumn(width="medium"),
+                 })
 
 
 def race_margin_timediff_chart(df_race: pd.DataFrame, groupby_cols: List[str], data_min: int):
@@ -368,6 +419,10 @@ def race_margin_timediff_chart(df_race: pd.DataFrame, groupby_cols: List[str], d
     df_race_clean.loc[:, "着差_数値"] = pd.to_numeric(df_race_clean["着差"], errors='coerce')
     df_race_clean = df_race_clean.dropna(subset=["着差_数値"])
     
+    # ソート用に特定の列をリネーム
+    df_race_clean = rename_col_for_sorting(df_race_clean, groupby_cols)
+
+
     # 条件名を作成
     df_race_clean["条件"] = ""
     for col in groupby_cols:

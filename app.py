@@ -87,13 +87,17 @@ with tab_analysis:
 
     if ss.sire_horse_dict:
         # 種牡馬を選択
-        selected_sire_horse_name = st.selectbox("Select Sire Horse Name", list(ss.sire_horse_dict.keys()))
+        selected_sire_horse_name = st.selectbox("Select Sire Horse Name", [None]+list(ss.sire_horse_dict.keys()), index=0)
 
         # selectboxが変更された時のみデータをロード
         if "selected_sire_horse_name" not in ss or ss.selected_sire_horse_name != selected_sire_horse_name:
-            ss.selected_sire_horse_name = selected_sire_horse_name
-            with st.spinner("Loading data..."):
-                ss.df_sire_raw, ss.df_race_raw = read_horse_raw_data(selected_sire_horse_name, ss.sire_horse_dict)
+            # もし選択がNoneの場合はスキップ
+            if selected_sire_horse_name is None:
+                st.info("種牡馬を選択してください。")
+            else:
+                ss.selected_sire_horse_name = selected_sire_horse_name
+                with st.spinner("Loading data..."):
+                    ss.df_sire_raw, ss.df_race_raw = read_horse_raw_data(selected_sire_horse_name, ss.sire_horse_dict)
         
         # サイドバーの条件をキーとして保持
         filter_key = (c_dirt_turf, tuple(c_distance) if c_distance else (), 
@@ -120,6 +124,7 @@ with tab_analysis:
             "季節",
             "カーブ",
             "芝ダート",
+            "クラス",
             "騎手"
         ]
         analysis_name = st.pills("Analysis Type",options_analysis,selection_mode="single")
@@ -175,6 +180,10 @@ with tab_analysis:
                 elif analysis_name == "馬場":
                     groupby_cols = ["馬場", "芝ダート", "距離区分"]
 
+                # クラスごとでの戦績
+                elif analysis_name == "クラス":
+                    groupby_cols = ["クラス", "芝ダート"]
+
                 if analysis_name and analysis_name != "産駒":
                     if c_show_timediff_graph:
                         st_widget.race_margin_timediff_chart(df_race, groupby_cols, data_min=c_data_min)
@@ -185,5 +194,4 @@ with tab_analysis:
 
             
             show_graph(df_race, analysis_name, c_data_min, c_show_timediff_graph)
-
 

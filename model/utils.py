@@ -226,11 +226,40 @@ def judge_distance_category(distance: int) -> str:
     else:
         return "2400~3000"
 
+
+def categorize_race_tier(race_name: str) -> str:
+    if not isinstance(race_name, str):
+        return "その他"
+    
+    if any(keyword in race_name for keyword in ["(ＧⅠ)", "(GI)", "G1", "Jpn1"]):
+        return "G1"
+    elif any(keyword in race_name for keyword in ["(ＧⅡ)", "(GII)", "G2", "Jpn2"]):
+        return "G2"
+    elif any(keyword in race_name for keyword in ["(ＧⅢ)", "(GIII)", "G3", "Jpn3"]):
+        return "G3"
+    elif any(keyword in race_name for keyword in ["オープン", "OP", "Open", "特別", "Ｓ", "S"]):
+        return "OP"
+    elif any(keyword in race_name for keyword in ["L"]):
+        return "L"
+    elif any(keyword in race_name for keyword in ["未勝利", "新馬"]):
+        return "新馬・未勝利"
+    elif "1勝クラス" in race_name or "500万" in race_name:
+        return "1勝クラス"
+    elif "2勝クラス" in race_name or "1000万" in race_name:
+        return "2勝クラス"
+    elif any(keyword in race_name for keyword in ["3勝クラス", "1600万"]):
+        return "3勝クラス"
+    elif "重賞" in race_name:
+        return "重賞"
+    else:
+        return "その他"
+
 def clean_race_df(df, field_info=field_info):
     df.rename(columns=lambda x: x.replace(" ", ""), inplace=True)
     df['芝ダート'] = df['距離'].apply(lambda x: x[0] if isinstance(x, str) and (x[0] == '芝' or x[0] == 'ダ') else None)
     df['距離_m'] = df['距離'].apply(lambda x: pd.to_numeric(x[1:], errors='coerce') if isinstance(x, str) else None)
     df['距離区分'] = df['距離_m'].apply(lambda x: judge_distance_category(x) if pd.notnull(x) else None) 
+    df['クラス'] = df['レース名'].apply(lambda x: categorize_race_tier(x))
 
     field_names = list(field_info['地方'].keys()) + list(field_info['中央'].keys())
     df['競馬場'] = df['開催'].apply(lambda x: next((name for name in field_names if isinstance(x, str) and name in x), None))
@@ -272,6 +301,7 @@ def read_horse_raw_data(
         key = path_parts[1] if len(path_parts) > 1 else ''
         
         # S3からデータを取得
+        # print(path_parts, bucket, key)
         response = s3.get_object(Bucket=bucket, Key=key)
         race_horse_names = json.loads(response['Body'].read().decode('utf-8'))
     else:
